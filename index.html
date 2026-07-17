@@ -185,7 +185,7 @@
     color: #999;
     margin-bottom: 0.4rem;
   }
-  #coords {
+  #coords, #realCoords {
     font-size: 0.75rem;
     font-family: monospace;
     color: #ccc;
@@ -252,6 +252,7 @@
 <div id="panel">
   <div class="status" id="status"></div>
   <div id="coords"></div>
+  <div id="realCoords"></div>
 </div>
 
 <select id="mapStyleSelect">
@@ -341,6 +342,7 @@ const minHour = nowFloorHour();
 const titleEl = document.getElementById("title");
 const statusEl = document.getElementById("status");
 const coordsEl = document.getElementById("coords");
+const realCoordsEl = document.getElementById("realCoords");
 const plotEl = document.getElementById("plot");
 const terrainEl = document.getElementById("terrain");
 const mapContainerEl = document.getElementById("mapContainer");
@@ -489,15 +491,30 @@ opacitySlider.addEventListener("input", () => {
 zoomInZone.addEventListener("click", zoomIn);
 zoomOutZone.addEventListener("click", zoomOut);
 
-// Resolve the centre point the map should sit on: explicit ?lat=&lon= wins,
-// otherwise fall back to the spoofed test location (Piedrahita area).
+// The map always centres on the spoofed test location (or an explicit
+// ?lat=&lon= override) - it never uses live geolocation for that. We still
+// fetch real geolocation separately, purely to display as text.
 function init() {
   if (params.lat == null || params.lon == null) {
     params.lat = SPOOFED_LOCATION.lat;
     params.lon = SPOOFED_LOCATION.lon;
   }
-  statusEl.textContent = `Centred on ${params.lat}, ${params.lon}`;
+  statusEl.textContent = `Centred on ${params.lat}, ${params.lon} (spoofed)`;
   render();
+
+  if (navigator.geolocation) {
+    realCoordsEl.textContent = "Obtaining real location…";
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        realCoordsEl.textContent =
+          `Real location: ${pos.coords.latitude.toFixed(5)}°, ${pos.coords.longitude.toFixed(5)}°`;
+      },
+      (err) => {
+        realCoordsEl.textContent = `Real location unavailable (${err.message})`;
+      },
+      { timeout: 8000 }
+    );
+  }
 }
 
 init();
