@@ -7,6 +7,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   html, body {
+    --top-bar-height: 4.5rem;
+    --bottom-bar-height: 3rem;
     background: #111;
     color: #eee;
     font-family: system-ui, sans-serif;
@@ -16,10 +18,13 @@
     overflow: hidden;
   }
 
-  /* Full-page map */
+  /* Map fills everything below the top bar and above the opacity bar */
   .map_viewport {
     position: fixed;
-    inset: 0;
+    top: var(--top-bar-height);
+    left: 0;
+    right: 0;
+    bottom: var(--bottom-bar-height);
     overflow: hidden;
   }
   .map_container {
@@ -49,9 +54,9 @@
     display: none;
   }
 
-  /* Click zones for zoom */
+  /* Click zones for zoom - cover only the map area (children of the viewport) */
   .zoom_zone {
-    position: fixed;
+    position: absolute;
     left: 0;
     width: 100%;
     height: 50%;
@@ -66,32 +71,32 @@
     cursor: zoom-out;
   }
 
-  /* Big time title, top centre, flanked by prev/next arrows */
+  /* Full-width top bar: back arrow - big time - forward arrow */
   #timeBar {
     position: fixed;
-    top: 0.5rem;
-    left: 50%;
-    transform: translateX(-50%);
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--top-bar-height);
     z-index: 100;
     display: flex;
     align-items: center;
-    gap: 1rem;
+    background: rgba(0, 0, 0, 0.6);
   }
   #title {
-    font-size: 2rem;
+    flex: 1;
+    text-align: center;
+    font-size: 2.2rem;
     font-weight: bold;
     margin: 0;
-    background: rgba(0, 0, 0, 0.6);
-    padding: 0.4rem 1.2rem;
-    border-radius: 10px;
     white-space: nowrap;
   }
   #timeBar button {
+    height: 100%;
     font-size: 2rem;
-    padding: 0.6rem 1.1rem;
+    padding: 0 1.5rem;
     cursor: pointer;
     border: 0;
-    border-radius: 12px;
     background: rgba(48, 96, 164, 0.9);
     color: #eee;
   }
@@ -101,10 +106,33 @@
     cursor: not-allowed;
   }
 
+  /* Full-width bottom bar: opacity slider */
+  #bottomBar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: var(--bottom-bar-height);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0 1rem;
+    background: rgba(0, 0, 0, 0.6);
+  }
+  #bottomBar label {
+    font-size: 0.8rem;
+    color: #ccc;
+    white-space: nowrap;
+  }
+  #bottomBar input[type=range] {
+    flex: 1;
+  }
+
   /* Floating control panel */
   #panel {
     position: fixed;
-    top: 0.5rem;
+    top: calc(var(--top-bar-height) + 0.5rem);
     left: 0.5rem;
     z-index: 100;
     background: rgba(0, 0, 0, 0.6);
@@ -145,11 +173,11 @@
 
   /* Crosshair marking the exact centre point (the spoofed/geolocated location) */
   #crosshair {
-    position: fixed;
+    position: absolute;
     top: 50%;
     left: 50%;
-    width: 26px;
-    height: 26px;
+    width: 52px;
+    height: 52px;
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 90;
@@ -163,13 +191,13 @@
     top: 50%;
     left: 0;
     width: 100%;
-    height: 2px;
+    height: 4px;
     transform: translateY(-50%);
   }
   #crosshair::after {
     left: 50%;
     top: 0;
-    width: 2px;
+    width: 4px;
     height: 100%;
     transform: translateX(-50%);
   }
@@ -182,17 +210,20 @@
     <img id="plot" alt="Convergence layer">
   </div>
   <div id="osmMap"></div>
+  <div id="zoomInZone" class="zoom_zone" title="Click to zoom in"></div>
+  <div id="zoomOutZone" class="zoom_zone" title="Click to zoom out"></div>
+  <div id="crosshair"></div>
 </div>
-
-<div id="zoomInZone" class="zoom_zone" title="Click to zoom in"></div>
-<div id="zoomOutZone" class="zoom_zone" title="Click to zoom out"></div>
-
-<div id="crosshair"></div>
 
 <div id="timeBar">
   <button id="hourDown">&larr;</button>
   <h1 id="title">Loading&hellip;</h1>
   <button id="hourUp">&rarr;</button>
+</div>
+
+<div id="bottomBar">
+  <label for="opacitySlider">Overlay opacity</label>
+  <input type="range" id="opacitySlider" min="0" max="100" value="50">
 </div>
 
 <div id="panel">
@@ -203,8 +234,6 @@
     <option value="geographic">Geographic</option>
     <option value="road">Road</option>
   </select>
-  <label for="opacitySlider">Overlay opacity</label>
-  <input type="range" id="opacitySlider" min="0" max="100" value="50">
 </div>
 
 <script>
@@ -235,6 +264,10 @@ const OSM_DEFAULT_CENTER = [
   (OSM_BOUNDS.south + OSM_BOUNDS.north) / 2,
   (OSM_BOUNDS.west + OSM_BOUNDS.east) / 2
 ];
+
+// Spoofed location used while testing away from Spain (Sierra de Gredos area,
+// near Piedrahita). Used whenever the URL doesn't override lat/lon itself.
+const SPOOFED_LOCATION = { lat: 40.65639, lon: -4.70043 };
 
 function pad2(n) {
   return n.toString().padStart(2, "0");
@@ -359,7 +392,7 @@ function render() {
 
   const plotUrl = buildPropUrl(params);
 
-  titleEl.textContent = `${params.year}-${params.month}-${params.day} ${pad2(params.hour)}:00z`;
+  titleEl.textContent = `${pad2(params.hour)}:00z`;
 
   if (params.mapStyle === "osm") {
     mapContainerEl.style.display = "none";
@@ -425,32 +458,14 @@ zoomInZone.addEventListener("click", zoomIn);
 zoomOutZone.addEventListener("click", zoomOut);
 
 // Resolve the centre point the map should sit on: explicit ?lat=&lon= wins,
-// otherwise try browser geolocation, otherwise just centre the full domain.
+// otherwise fall back to the spoofed test location (Piedrahita area).
 function init() {
-  if (params.lat != null && params.lon != null) {
-    statusEl.textContent = `Centred on given location (${params.lat}, ${params.lon})`;
-    render();
-    return;
+  if (params.lat == null || params.lon == null) {
+    params.lat = SPOOFED_LOCATION.lat;
+    params.lon = SPOOFED_LOCATION.lon;
   }
-
-  if (navigator.geolocation) {
-    statusEl.textContent = "Locating you…";
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        params.lat = pos.coords.latitude;
-        params.lon = pos.coords.longitude;
-        statusEl.textContent = `Centred on your location (${params.lat.toFixed(4)}, ${params.lon.toFixed(4)})`;
-        render();
-      },
-      (err) => {
-        statusEl.textContent = `Location unavailable (${err.message}) — centred on full domain`;
-        render();
-      },
-      { timeout: 8000 }
-    );
-  } else {
-    render();
-  }
+  statusEl.textContent = `Centred on ${params.lat}, ${params.lon}`;
+  render();
 }
 
 init();
