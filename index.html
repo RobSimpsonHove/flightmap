@@ -52,6 +52,8 @@
     width: 100%;
     height: 100%;
     display: none;
+    z-index: 0; /* isolate Leaflet's internal panes (z-index up to 800) so they
+                   can't leak out and paint over the crosshair/zoom zones */
   }
 
   /* Click zones for zoom - cover only the map area (children of the viewport) */
@@ -204,7 +206,7 @@
     height: 52px;
     transform: translate(-50%, -50%);
     pointer-events: none;
-    z-index: 90;
+    z-index: 95;
   }
   #crosshair::before, #crosshair::after {
     content: "";
@@ -292,7 +294,7 @@ const OSM_DEFAULT_CENTER = [
 
 // Spoofed location used while testing away from Spain (Sierra de Gredos area,
 // near Piedrahita). Used whenever the URL doesn't override lat/lon itself.
-const SPOOFED_LOCATION = { lat: 40.65639, lon: -4.70043 };
+const SPOOFED_LOCATION = { lat: 40.4978688, lon: -5.230256499999999 };
 
 function pad2(n) {
   return n.toString().padStart(2, "0");
@@ -314,10 +316,14 @@ function getBaseParams() {
 
   let lat = q.get("lat") ? parseFloat(q.get("lat")) : null;
   let lon = q.get("lon") ? parseFloat(q.get("lon")) : null;
+  // Only true when the URL itself specified lat/lon - lets us avoid ever
+  // writing the default spoofed location back into the URL, where it would
+  // wrongly "stick" and override future changes to SPOOFED_LOCATION.
+  const explicitLocation = lat != null && lon != null;
 
   const mapStyle = ["geographic", "road", "osm"].includes(q.get("style")) ? q.get("style") : "osm";
 
-  return { domain: DOMAIN, year, month, day, hour, lat, lon, mapStyle };
+  return { domain: DOMAIN, year, month, day, hour, lat, lon, explicitLocation, mapStyle };
 }
 
 function buildPropUrl({ domain, year, month, day, hour }) {
@@ -337,7 +343,9 @@ function getMapCenter() {
 }
 
 let params = getBaseParams();
-const minHour = nowFloorHour();
+// How far back the ← button is allowed to go: up to 10 hours before now,
+// but never earlier than the site's own earliest published hour.
+const minHour = Math.max(MIN_SITE_HOUR, nowFloorHour() - 10);
 
 const titleEl = document.getElementById("title");
 const statusEl = document.getElementById("status");
@@ -380,8 +388,13 @@ function ensureLeafletMap() {
     minZoom: 7,
     maxZoom: 14
   });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "&copy; OpenStreetMap contributors"
+  // CARTO Voyager tiles - same OSM data, larger/clearer labels than the
+  // default OSM Mapnik style, plus retina tiles for sharper text.
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+    subdomains: "abcd",
+    maxZoom: 20,
+    detectRetina: true
   }).addTo(leafletMap);
   const bounds = [[OSM_BOUNDS.south, OSM_BOUNDS.west], [OSM_BOUNDS.north, OSM_BOUNDS.east]];
   leafletOverlay = L.imageOverlay("", bounds, { opacity: opacitySlider.value / 100 }).addTo(leafletMap);
@@ -457,8 +470,10 @@ function render() {
   q.set("month", params.month);
   q.set("day", params.day);
   q.set("hour", params.hour);
-  if (params.lat != null) q.set("lat", params.lat);
-  if (params.lon != null) q.set("lon", params.lon);
+  if (params.explicitLocation) {
+    q.set("lat", params.lat);
+    q.set("lon", params.lon);
+  }
   history.replaceState(null, "", "?" + q.toString());
 }
 
