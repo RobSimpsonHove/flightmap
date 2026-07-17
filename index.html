@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>RASP Convergence Viewer</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -323,7 +326,12 @@ function getBaseParams() {
 
   const mapStyle = ["geographic", "road", "osm"].includes(q.get("style")) ? q.get("style") : "osm";
 
-  return { domain: DOMAIN, year, month, day, hour, lat, lon, explicitLocation, mapStyle };
+  // Passed through untouched if present, so a manually-bumped ?v= survives
+  // our own history.replaceState calls - lets apps like XCTrack that cache
+  // by URL be forced to treat it as a fresh page just by incrementing it.
+  const v = q.get("v");
+
+  return { domain: DOMAIN, year, month, day, hour, lat, lon, explicitLocation, mapStyle, v };
 }
 
 function buildPropUrl({ domain, year, month, day, hour }) {
@@ -474,6 +482,7 @@ function render() {
     q.set("lat", params.lat);
     q.set("lon", params.lon);
   }
+  if (params.v) q.set("v", params.v);
   history.replaceState(null, "", "?" + q.toString());
 }
 
