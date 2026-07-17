@@ -120,22 +120,17 @@
     padding: 0 1rem;
     background: rgba(0, 0, 0, 0.6);
   }
-  #bottomBar label {
-    font-size: 1rem;
-    color: #ccc;
-    white-space: nowrap;
-  }
   #bottomBar input[type=range] {
     flex: 1;
     height: 2rem;
     -webkit-appearance: none;
     appearance: none;
-    background: transparent;
+    background: transparent; /* fill colour is set inline by JS */
   }
   #bottomBar input[type=range]::-webkit-slider-runnable-track {
     height: 16px;
-    background: #444;
     border-radius: 8px;
+    background: transparent;
   }
   #bottomBar input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -148,8 +143,8 @@
   }
   #bottomBar input[type=range]::-moz-range-track {
     height: 16px;
-    background: #444;
     border-radius: 8px;
+    background: transparent;
   }
   #bottomBar input[type=range]::-moz-range-thumb {
     width: 28px;
@@ -166,6 +161,7 @@
     bottom: calc(var(--bottom-bar-height) + 0.5rem);
     left: 0.5rem;
     z-index: 100;
+    font-size: 2rem;
     padding: 0.4rem 0.6rem;
     border-radius: 6px;
     border: 0;
@@ -250,7 +246,6 @@
 </div>
 
 <div id="bottomBar">
-  <label for="opacitySlider">Overlay opacity</label>
   <input type="range" id="opacitySlider" min="0" max="100" value="50">
 </div>
 
@@ -362,7 +357,14 @@ const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.25;
 let zoomLevel = MIN_ZOOM + ZOOM_STEP;
 
+function updateSliderFill() {
+  const v = opacitySlider.value;
+  opacitySlider.style.background =
+    `linear-gradient(to right, #3060a4 0%, #3060a4 ${v}%, #444 ${v}%, #444 100%)`;
+}
+
 plotEl.style.opacity = opacitySlider.value / 100;
+updateSliderFill();
 
 // Leaflet map + overlay, created lazily the first time OSM mode is used
 let leafletMap = null;
@@ -481,6 +483,7 @@ opacitySlider.addEventListener("input", () => {
   const v = opacitySlider.value / 100;
   plotEl.style.opacity = v;
   if (leafletOverlay) leafletOverlay.setOpacity(v);
+  updateSliderFill();
 });
 
 zoomInZone.addEventListener("click", zoomIn);
