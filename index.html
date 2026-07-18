@@ -692,6 +692,41 @@ function init() {
 }
 
 init();
+
+// Diagnostic overlay (?debug=1) - shows the actual reported/measured
+// dimensions on-screen, since XCTrack's embedded webview keeps showing the
+// crosshair 1/3 down for reasons that 3 different height-fix attempts
+// (dvh, explicit calc, JS innerHeight) haven't changed at all - need real
+// numbers from inside it rather than guessing further.
+if (new URLSearchParams(window.location.search).get("debug") === "1") {
+  const box = document.createElement("div");
+  box.style.cssText =
+    "position:fixed;top:0;left:0;right:0;z-index:999;background:#000;color:#0f0;" +
+    "font-family:monospace;font-size:11px;padding:4px;white-space:pre-wrap;pointer-events:none;";
+  document.body.appendChild(box);
+
+  function updateDebug() {
+    const vp = mapViewportOrNull();
+    const ch = document.getElementById("crosshair");
+    const chRect = ch ? ch.getBoundingClientRect() : null;
+    const vpRect = vp ? vp.getBoundingClientRect() : null;
+    box.textContent =
+      `innerHeight: ${window.innerHeight}\n` +
+      `clientHeight: ${document.documentElement.clientHeight}\n` +
+      `screen.height: ${screen.height}\n` +
+      `visualViewport.height: ${window.visualViewport ? window.visualViewport.height : "n/a"}\n` +
+      `devicePixelRatio: ${window.devicePixelRatio}\n` +
+      `--vh-actual: ${getComputedStyle(document.documentElement).getPropertyValue("--vh-actual")}\n` +
+      `mapViewport rect: top=${vpRect ? vpRect.top.toFixed(0) : "?"} height=${vpRect ? vpRect.height.toFixed(0) : "?"} bottom=${vpRect ? vpRect.bottom.toFixed(0) : "?"}\n` +
+      `crosshair rect: top=${chRect ? chRect.top.toFixed(0) : "?"} centerY=${chRect ? (chRect.top + chRect.height / 2).toFixed(0) : "?"}\n` +
+      `userAgent: ${navigator.userAgent}`;
+  }
+  function mapViewportOrNull() { return document.getElementById("mapViewport"); }
+
+  updateDebug();
+  window.addEventListener("resize", updateDebug);
+  setInterval(updateDebug, 1000);
+}
 </script>
 </body>
 </html>
