@@ -52,11 +52,6 @@
     left: 0;
     top: 0;
   }
-  #windVec {
-    position: absolute;
-    left: 0;
-    top: 0;
-  }
   #osmMap {
     width: 100%;
     height: 100%;
@@ -206,6 +201,13 @@
     font-family: monospace;
   }
 
+  /* Wind barb markers (Open-Meteo, OSM mode only) - strip Leaflet's default
+     divIcon box styling so only our own SVG shows */
+  .wind-barb-icon {
+    background: transparent;
+    border: none;
+  }
+
   /* Crosshair marking the exact centre point (the spoofed/geolocated location) */
   #crosshair {
     position: absolute;
@@ -243,7 +245,6 @@
   <div class="map_container" id="mapContainer">
     <img id="terrain" alt="Terrain">
     <img id="plot" alt="Convergence layer">
-    <img id="windVec" alt="Surface wind">
   </div>
   <div id="osmMap"></div>
   <div id="zoomInZone" class="zoom_zone" title="Click to zoom in"></div>
@@ -277,8 +278,6 @@
 // Config for the raspuri.mooo.com data source
 const FOLDER_ROOT = "https://raspuri.mooo.com/assets/images/Spain6_1";
 const PROP = "wblmaxmin"; // Convergencias
-const WIND_PROP = "sfcwind"; // Surface wind. True barbs (_barb) only exist for
-// zoomed crops, not the full domain, so we use the plain arrow layer (_vec).
 const MIN_SITE_HOUR = 6;
 const MAX_SITE_HOUR = 20;
 const DOMAIN = "d02"; // Sistema Central, 1.2km
@@ -307,6 +306,95 @@ const OSM_DEFAULT_CENTER = [
 // Spoofed location used while testing away from Spain (Sierra de Gredos area,
 // near Piedrahita). Used whenever the URL doesn't override lat/lon itself.
 const SPOOFED_LOCATION = { lat: 40.4978688, lon: -5.230256499999999 };
+
+// Wind barbs: raspuri.mooo.com only has true barbs for its 3 zoomed crops,
+// not the full domain, so instead we fetch raw wind forecasts from Open-Meteo
+// (free, no key, CORS-friendly) for a grid of points across the full domain
+// and draw real barb symbols ourselves. OSM mode only - the grid points are
+// plain lat/lon, and there's no equivalent coordinate system to place them
+// on in the static Geographic/Road image modes.
+const WIND_API = "https://api.open-meteo.com/v1/forecast";
+const WIND_GRID_COLS = 8;
+const WIND_GRID_ROWS = 6;
+
+function buildWindGridPoints() {
+  const latPad = (OSM_BOUNDS.north - OSM_BOUNDS.south) * 0.08;
+  const lonPad = (OSM_BOUNDS.east - OSM_BOUNDS.west) * 0.08;
+  const latMin = OSM_BOUNDS.south + latPad, latMax = OSM_BOUNDS.north - latPad;
+  const lonMin = OSM_BOUNDS.west + lonPad, lonMax = OSM_BOUNDS.east - lonPad;
+  const pts = [];
+  for (let r = 0; r < WIND_GRID_ROWS; r++) {
+    for (let c = 0; c < WIND_GRID_COLS; c++) {
+      pts.push({
+        lat: latMin + (latMax - latMin) * (r / (WIND_GRID_ROWS - 1)),
+        lon: lonMin + (lonMax - lonMin) * (c / (WIND_GRID_COLS - 1))
+      });
+    }
+  }
+  return pts;
+}
+const WIND_GRID_POINTS = buildWindGridPoints();
+
+// One fetch per date covers all 24 hours, so hour changes don't need a refetch
+const windGridCache = {};
+function fetchWindGrid(dateStr) {
+  if (windGridCache[dateStr]) return windGridCache[dateStr];
+  const lats = WIND_GRID_POINTS.map(p => p.lat.toFixed(4)).join(",");
+  const lons = WIND_GRID_POINTS.map(p => p.lon.toFixed(4)).join(",");
+  const url = `${WIND_API}?latitude=${lats}&longitude=${lons}` +
+    `&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn` +
+    `&start_date=${dateStr}&end_date=${dateStr}&timezone=UTC`;
+  const promise = fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      const arr = Array.isArray(data) ? data : [data];
+      return WIND_GRID_POINTS.map((p, i) => ({
+        lat: p.lat,
+        lon: p.lon,
+        time: arr[i].hourly.time,
+        speed: arr[i].hourly.wind_speed_10m,
+        dir: arr[i].hourly.wind_direction_10m
+      }));
+    });
+  windGridCache[dateStr] = promise;
+  return promise;
+}
+
+// Meteorological wind barb: staff points toward where the wind comes FROM,
+// with pennants (50kt)/full barbs (10kt)/half barbs (5kt) on that end.
+// Direction is rotated with CSS so 0deg (north) keeps the barbs pointing up.
+function windBarbSVG(speedKt, dirDeg) {
+  const size = 44, half = size / 2, staffLen = 22;
+  let spd = Math.round(speedKt / 5) * 5;
+
+  if (spd < 3) {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
+      `<circle cx="${half}" cy="${half}" r="4" fill="none" stroke="#111" stroke-width="1.8"/></svg>`;
+  }
+
+  const pennants = Math.floor(spd / 50); spd %= 50;
+  const fullBarbs = Math.floor(spd / 10); spd %= 10;
+  const halfBarb = spd >= 5 ? 1 : 0;
+
+  const tipY = half - staffLen / 2;
+  let marks = "";
+  let y = tipY;
+  for (let i = 0; i < pennants; i++) {
+    marks += `<path d="M ${half} ${y} L ${half + 9} ${y + 5} L ${half} ${y + 10} Z" fill="#111"/>`;
+    y += 10;
+  }
+  for (let i = 0; i < fullBarbs; i++) {
+    marks += `<line x1="${half}" y1="${y}" x2="${half + 9}" y2="${y - 4}" stroke="#111" stroke-width="2"/>`;
+    y += 5;
+  }
+  if (halfBarb) {
+    marks += `<line x1="${half}" y1="${y}" x2="${half + 5}" y2="${y - 2}" stroke="#111" stroke-width="2"/>`;
+  }
+
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform: rotate(${dirDeg}deg);">` +
+    `<line x1="${half}" y1="${tipY}" x2="${half}" y2="${half + staffLen / 2}" stroke="#111" stroke-width="2"/>` +
+    marks + `</svg>`;
+}
 
 function pad2(n) {
   return n.toString().padStart(2, "0");
@@ -347,10 +435,6 @@ function buildPropUrl({ domain, year, month, day, hour }) {
   return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${PROP}.webp`;
 }
 
-function buildWindUrl({ domain, year, month, day, hour }) {
-  return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${WIND_PROP}_vec.webp`;
-}
-
 function buildBaseUrl({ domain, mapStyle }) {
   const layer = BASE_LAYERS[mapStyle] || BASE_LAYERS.geographic;
   return `${FOLDER_ROOT}/${domain}/${layer}.webp`;
@@ -373,7 +457,6 @@ const statusEl = document.getElementById("status");
 const coordsEl = document.getElementById("coords");
 const realCoordsEl = document.getElementById("realCoords");
 const plotEl = document.getElementById("plot");
-const windVecEl = document.getElementById("windVec");
 const terrainEl = document.getElementById("terrain");
 const mapContainerEl = document.getElementById("mapContainer");
 const osmMapEl = document.getElementById("osmMap");
@@ -398,10 +481,9 @@ function updateSliderFill() {
 plotEl.style.opacity = opacitySlider.value / 100;
 updateSliderFill();
 
-// Leaflet map + overlays, created lazily the first time OSM mode is used
+// Leaflet map + overlay, created lazily the first time OSM mode is used
 let leafletMap = null;
 let leafletOverlay = null;
-let leafletWindOverlay = null;
 function ensureLeafletMap() {
   if (leafletMap) return;
   leafletMap = L.map(osmMapEl, {
@@ -421,8 +503,40 @@ function ensureLeafletMap() {
   }).addTo(leafletMap);
   const bounds = [[OSM_BOUNDS.south, OSM_BOUNDS.west], [OSM_BOUNDS.north, OSM_BOUNDS.east]];
   leafletOverlay = L.imageOverlay("", bounds, { opacity: opacitySlider.value / 100 }).addTo(leafletMap);
-  leafletWindOverlay = L.imageOverlay("", bounds, { opacity: 1 }).addTo(leafletMap);
   leafletMap.setView(getMapCenter(), 11);
+}
+
+// Wind barb markers - live Leaflet markers (not an image), so they stay
+// correctly positioned automatically as the map zooms
+let windBarbMarkers = [];
+function clearWindBarbs() {
+  windBarbMarkers.forEach(m => leafletMap.removeLayer(m));
+  windBarbMarkers = [];
+}
+
+function renderWindBarbs() {
+  const dateStr = `${params.year}-${params.month}-${params.day}`;
+  fetchWindGrid(dateStr)
+    .then(grid => {
+      // The user may have changed mode/date/hour while this was in flight
+      if (params.mapStyle !== "osm" || `${params.year}-${params.month}-${params.day}` !== dateStr) return;
+      const targetTime = `${params.year}-${params.month}-${params.day}T${pad2(params.hour)}:00`;
+      clearWindBarbs();
+      grid.forEach(pt => {
+        const idx = pt.time.indexOf(targetTime);
+        if (idx === -1) return;
+        const icon = L.divIcon({
+          html: windBarbSVG(pt.speed[idx], pt.dir[idx]),
+          className: "wind-barb-icon",
+          iconSize: [44, 44],
+          iconAnchor: [22, 22]
+        });
+        windBarbMarkers.push(
+          L.marker([pt.lat, pt.lon], { icon, interactive: false }).addTo(leafletMap)
+        );
+      });
+    })
+    .catch(err => console.error("Wind grid fetch failed", err));
 }
 
 function zoomIn() {
@@ -461,7 +575,6 @@ function render() {
   updateCoordsDisplay();
 
   const plotUrl = buildPropUrl(params);
-  const windUrl = buildWindUrl(params);
 
   titleEl.textContent = `${pad2(params.hour)}:00z`;
 
@@ -471,18 +584,18 @@ function render() {
     ensureLeafletMap();
     leafletMap.setView(getMapCenter(), leafletMap.getZoom());
     leafletOverlay.setUrl(plotUrl);
-    leafletWindOverlay.setUrl(windUrl);
+    renderWindBarbs();
     setTimeout(() => leafletMap.invalidateSize(), 0);
   } else {
     osmMapEl.style.display = "none";
     mapContainerEl.style.display = "block";
+    if (leafletMap) clearWindBarbs();
     const baseUrl = buildBaseUrl(params);
     terrainEl.src = baseUrl;
     plotEl.src = plotUrl;
     plotEl.onerror = () => {
       titleEl.innerHTML = `<span class="error">No data at this location/date/time:<br>${plotUrl}</span>`;
     };
-    windVecEl.src = windUrl;
     applyZoom();
   }
 
