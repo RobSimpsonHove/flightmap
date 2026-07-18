@@ -7,6 +7,18 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>RASP Convergence Viewer</title>
+<script>
+  // Some embedded webviews (e.g. XCTrack's built-in browser) don't reliably
+  // support dvh or have their own viewport quirks that dvh doesn't fix.
+  // window.innerHeight is far more universally accurate, so we measure it
+  // directly and expose it as a CSS variable, kept in sync on resize.
+  function setActualViewportHeight() {
+    document.documentElement.style.setProperty("--vh-actual", window.innerHeight + "px");
+  }
+  setActualViewportHeight();
+  window.addEventListener("resize", setActualViewportHeight);
+  window.addEventListener("orientationchange", setActualViewportHeight);
+</script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -19,17 +31,14 @@
     margin: 0;
     padding: 0;
     height: 100vh;
-    height: 100dvh; /* actual visible height on mobile, ignoring the address
-                       bar's reserved space - fixes the crosshair/bars being
-                       centred against a taller-than-visible layout box */
+    height: 100dvh;
+    height: var(--vh-actual, 100dvh); /* JS-measured window.innerHeight - most
+      reliable across quirky embedded webviews (e.g. XCTrack), which may not
+      support dvh properly or have their own viewport-sizing quirks */
     overflow: hidden;
   }
 
-  /* Map fills everything below the top bar and above the opacity bar.
-     Height is computed explicitly from dvh rather than relying on
-     position:fixed's implicit top+bottom sizing, which some mobile browser
-     engines resolve against the full layout viewport (behind the address
-     bar) instead of what's actually visible. */
+  /* Map fills everything below the top bar and above the opacity bar. */
   .map_viewport {
     position: fixed;
     top: var(--top-bar-height);
@@ -37,6 +46,7 @@
     right: 0;
     height: calc(100vh - var(--top-bar-height) - var(--bottom-bar-height));
     height: calc(100dvh - var(--top-bar-height) - var(--bottom-bar-height));
+    height: calc(var(--vh-actual, 100dvh) - var(--top-bar-height) - var(--bottom-bar-height));
     overflow: hidden;
   }
   .map_container {
