@@ -52,6 +52,11 @@
     left: 0;
     top: 0;
   }
+  #windVec {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
   #osmMap {
     width: 100%;
     height: 100%;
@@ -238,6 +243,7 @@
   <div class="map_container" id="mapContainer">
     <img id="terrain" alt="Terrain">
     <img id="plot" alt="Convergence layer">
+    <img id="windVec" alt="Surface wind">
   </div>
   <div id="osmMap"></div>
   <div id="zoomInZone" class="zoom_zone" title="Click to zoom in"></div>
@@ -271,6 +277,8 @@
 // Config for the raspuri.mooo.com data source
 const FOLDER_ROOT = "https://raspuri.mooo.com/assets/images/Spain6_1";
 const PROP = "wblmaxmin"; // Convergencias
+const WIND_PROP = "sfcwind"; // Surface wind. True barbs (_barb) only exist for
+// zoomed crops, not the full domain, so we use the plain arrow layer (_vec).
 const MIN_SITE_HOUR = 6;
 const MAX_SITE_HOUR = 20;
 const DOMAIN = "d02"; // Sistema Central, 1.2km
@@ -339,6 +347,10 @@ function buildPropUrl({ domain, year, month, day, hour }) {
   return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${PROP}.webp`;
 }
 
+function buildWindUrl({ domain, year, month, day, hour }) {
+  return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${WIND_PROP}_vec.webp`;
+}
+
 function buildBaseUrl({ domain, mapStyle }) {
   const layer = BASE_LAYERS[mapStyle] || BASE_LAYERS.geographic;
   return `${FOLDER_ROOT}/${domain}/${layer}.webp`;
@@ -361,6 +373,7 @@ const statusEl = document.getElementById("status");
 const coordsEl = document.getElementById("coords");
 const realCoordsEl = document.getElementById("realCoords");
 const plotEl = document.getElementById("plot");
+const windVecEl = document.getElementById("windVec");
 const terrainEl = document.getElementById("terrain");
 const mapContainerEl = document.getElementById("mapContainer");
 const osmMapEl = document.getElementById("osmMap");
@@ -385,9 +398,10 @@ function updateSliderFill() {
 plotEl.style.opacity = opacitySlider.value / 100;
 updateSliderFill();
 
-// Leaflet map + overlay, created lazily the first time OSM mode is used
+// Leaflet map + overlays, created lazily the first time OSM mode is used
 let leafletMap = null;
 let leafletOverlay = null;
+let leafletWindOverlay = null;
 function ensureLeafletMap() {
   if (leafletMap) return;
   leafletMap = L.map(osmMapEl, {
@@ -407,6 +421,7 @@ function ensureLeafletMap() {
   }).addTo(leafletMap);
   const bounds = [[OSM_BOUNDS.south, OSM_BOUNDS.west], [OSM_BOUNDS.north, OSM_BOUNDS.east]];
   leafletOverlay = L.imageOverlay("", bounds, { opacity: opacitySlider.value / 100 }).addTo(leafletMap);
+  leafletWindOverlay = L.imageOverlay("", bounds, { opacity: 1 }).addTo(leafletMap);
   leafletMap.setView(getMapCenter(), 11);
 }
 
@@ -446,6 +461,7 @@ function render() {
   updateCoordsDisplay();
 
   const plotUrl = buildPropUrl(params);
+  const windUrl = buildWindUrl(params);
 
   titleEl.textContent = `${pad2(params.hour)}:00z`;
 
@@ -455,6 +471,7 @@ function render() {
     ensureLeafletMap();
     leafletMap.setView(getMapCenter(), leafletMap.getZoom());
     leafletOverlay.setUrl(plotUrl);
+    leafletWindOverlay.setUrl(windUrl);
     setTimeout(() => leafletMap.invalidateSize(), 0);
   } else {
     osmMapEl.style.display = "none";
@@ -465,6 +482,7 @@ function render() {
     plotEl.onerror = () => {
       titleEl.innerHTML = `<span class="error">No data at this location/date/time:<br>${plotUrl}</span>`;
     };
+    windVecEl.src = windUrl;
     applyZoom();
   }
 
