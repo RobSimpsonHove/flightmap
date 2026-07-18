@@ -27,6 +27,18 @@
   setActualViewportHeight();
   window.addEventListener("resize", setActualViewportHeight);
   window.addEventListener("orientationchange", setActualViewportHeight);
+  // XCTrack race: its webview can start small, with the page loading (and
+  // innerHeight being captured) before XCTrack expands it to full size -
+  // and that expansion fires no resize event, leaving --vh-actual frozen
+  // at the small value (measured: crosshair positioned as if the viewport
+  // were ~540px when the real height was ~720). Poll to catch it.
+  let lastMeasuredH = window.innerHeight;
+  setInterval(function () {
+    if (window.innerHeight !== lastMeasuredH) {
+      lastMeasuredH = window.innerHeight;
+      setActualViewportHeight();
+    }
+  }, 500);
 </script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
