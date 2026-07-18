@@ -12,8 +12,17 @@
   // support dvh or have their own viewport quirks that dvh doesn't fix.
   // window.innerHeight is far more universally accurate, so we measure it
   // directly and expose it as a CSS variable, kept in sync on resize.
+  //
+  // Worse still, XCTrack was found to CLIP the bottom of the webview while
+  // still reporting the full height to every JS API (innerHeight,
+  // visualViewport, screen.height all agreed on 720 while the bottom bar was
+  // visibly cut off) - undetectable from inside, so ?vh=NNN lets the user
+  // declare the truly visible height manually and calibrate by eye.
+  const vhParam = parseInt(new URLSearchParams(window.location.search).get("vh"), 10);
+  window.__vhOverride = Number.isFinite(vhParam) && vhParam > 100 ? vhParam : null;
   function setActualViewportHeight() {
-    document.documentElement.style.setProperty("--vh-actual", window.innerHeight + "px");
+    const h = window.__vhOverride || window.innerHeight;
+    document.documentElement.style.setProperty("--vh-actual", h + "px");
   }
   setActualViewportHeight();
   window.addEventListener("resize", setActualViewportHeight);
@@ -130,10 +139,13 @@
     cursor: not-allowed;
   }
 
-  /* Full-width bottom bar: opacity slider */
+  /* Full-width bottom bar: opacity slider. Pinned not to the webview's own
+     bottom edge but to the bottom of the *visible* area (100vh minus the
+     measured/overridden height = the clipped/obscured strip, if any). */
   #bottomBar {
     position: fixed;
     bottom: 0;
+    bottom: calc(100vh - var(--vh-actual, 100vh));
     left: 0;
     right: 0;
     height: var(--bottom-bar-height);
@@ -179,10 +191,11 @@
     cursor: pointer;
   }
 
-  /* Map style picker, bottom left */
+  /* Map style picker, bottom left - offset from the visible bottom, like #bottomBar */
   #mapStyleSelect {
     position: fixed;
     bottom: calc(var(--bottom-bar-height) + 0.5rem);
+    bottom: calc(100vh - var(--vh-actual, 100vh) + var(--bottom-bar-height) + 0.5rem);
     left: 0.5rem;
     z-index: 100;
     font-size: 2rem;
@@ -638,6 +651,7 @@ function render() {
   }
   if (params.v) q.set("v", params.v);
   if (debugMode) q.set("debug", "1");
+  if (window.__vhOverride) q.set("vh", window.__vhOverride);
   history.replaceState(null, "", "?" + q.toString());
 }
 
