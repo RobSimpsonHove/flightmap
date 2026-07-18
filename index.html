@@ -25,13 +25,18 @@
     overflow: hidden;
   }
 
-  /* Map fills everything below the top bar and above the opacity bar */
+  /* Map fills everything below the top bar and above the opacity bar.
+     Height is computed explicitly from dvh rather than relying on
+     position:fixed's implicit top+bottom sizing, which some mobile browser
+     engines resolve against the full layout viewport (behind the address
+     bar) instead of what's actually visible. */
   .map_viewport {
     position: fixed;
     top: var(--top-bar-height);
     left: 0;
     right: 0;
-    bottom: var(--bottom-bar-height);
+    height: calc(100vh - var(--top-bar-height) - var(--bottom-bar-height));
+    height: calc(100dvh - var(--top-bar-height) - var(--bottom-bar-height));
     overflow: hidden;
   }
   .map_container {
