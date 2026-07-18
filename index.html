@@ -52,6 +52,11 @@
     left: 0;
     top: 0;
   }
+  #windVec {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
   #osmMap {
     width: 100%;
     height: 100%;
@@ -161,26 +166,18 @@
     cursor: pointer;
   }
 
-  /* Parameter/location/map style pickers, stacked bottom left */
-  #pickers {
+  /* Map style picker, bottom left */
+  #mapStyleSelect {
     position: fixed;
     bottom: calc(var(--bottom-bar-height) + 0.5rem);
     left: 0.5rem;
     z-index: 100;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  #pickers select {
     font-size: 2rem;
     padding: 0.4rem 0.6rem;
     border-radius: 6px;
     border: 0;
     background: #3060a4;
     color: #eee;
-  }
-  #locationSelect {
-    display: none;
   }
 
   /* Floating status/coords panel */
@@ -245,7 +242,8 @@
 <div class="map_viewport" id="mapViewport">
   <div class="map_container" id="mapContainer">
     <img id="terrain" alt="Terrain">
-    <img id="plot" alt="Overlay layer">
+    <img id="plot" alt="Convergence layer">
+    <img id="windVec" alt="Surface wind">
   </div>
   <div id="osmMap"></div>
   <div id="zoomInZone" class="zoom_zone" title="Click to zoom in"></div>
@@ -269,26 +267,18 @@
   <div id="realCoords"></div>
 </div>
 
-<div id="pickers">
-  <select id="parameterSelect">
-    <option value="convergence">Convergence</option>
-    <option value="wind">Wind (barbs)</option>
-  </select>
-  <select id="locationSelect">
-    <option value="zguadarrama">Guadarrama</option>
-    <option value="zgredos">Gredos (Piedrahita)</option>
-    <option value="zbejar">Béjar</option>
-  </select>
-  <select id="mapStyleSelect">
-    <option value="osm">OpenStreetMap</option>
-    <option value="geographic">Geographic</option>
-    <option value="road">Road</option>
-  </select>
-</div>
+<select id="mapStyleSelect">
+  <option value="osm">OpenStreetMap</option>
+  <option value="geographic">Geographic</option>
+  <option value="road">Road</option>
+</select>
 
 <script>
 // Config for the raspuri.mooo.com data source
 const FOLDER_ROOT = "https://raspuri.mooo.com/assets/images/Spain6_1";
+const PROP = "wblmaxmin"; // Convergencias
+const WIND_PROP = "sfcwind"; // Surface wind. True barbs (_barb) only exist for
+// zoomed crops, not the full domain, so we use the plain arrow layer (_vec).
 const MIN_SITE_HOUR = 6;
 const MAX_SITE_HOUR = 20;
 const DOMAIN = "d02"; // Sistema Central, 1.2km
@@ -298,23 +288,6 @@ const BASE_LAYERS = {
   geographic: "terrain",
   road: "roads"
 };
-
-// The two selectable overlay parameters. Convergence is always full-domain
-// (verified OSM bounds exist for it). Wind uses true barbs, which raspuri.mooo.com
-// only publishes per zoomed crop, never for the full domain - so wind mode always
-// needs one of CROPS selected, and OSM mode (no verified bounds for crops) is
-// unavailable while it's active.
-const PARAMETERS = {
-  convergence: { prop: "wblmaxmin", needsCrop: false },
-  wind: { prop: "sfcwind_barb", needsCrop: true }
-};
-
-const CROPS = {
-  zguadarrama: "Guadarrama",
-  zgredos: "Gredos (Piedrahita)",
-  zbejar: "Béjar"
-};
-const DEFAULT_CROP = "zgredos";
 
 // Geographic bounds of the FULL d02 domain image, derived by cross-referencing
 // 11 known cities (Salamanca, Avila, Madrid, Segovia, etc.) against the site's
@@ -360,35 +333,27 @@ function getBaseParams() {
   // wrongly "stick" and override future changes to SPOOFED_LOCATION.
   const explicitLocation = lat != null && lon != null;
 
-  const parameter = q.get("param") === "wind" ? "wind" : "convergence";
-
-  let crop = CROPS[q.get("zoom")] ? q.get("zoom") : null;
-
-  let mapStyle = ["geographic", "road", "osm"].includes(q.get("style")) ? q.get("style") : "osm";
-  // Wind mode always needs a crop, which has no verified OSM bounds
-  if (parameter === "wind") {
-    if (!crop) crop = DEFAULT_CROP;
-    if (mapStyle === "osm") mapStyle = "geographic";
-  }
+  const mapStyle = ["geographic", "road", "osm"].includes(q.get("style")) ? q.get("style") : "osm";
 
   // Passed through untouched if present, so a manually-bumped ?v= survives
   // our own history.replaceState calls - lets apps like XCTrack that cache
   // by URL be forced to treat it as a fresh page just by incrementing it.
   const v = q.get("v");
 
-  return { domain: DOMAIN, year, month, day, hour, lat, lon, explicitLocation, parameter, crop, mapStyle, v };
+  return { domain: DOMAIN, year, month, day, hour, lat, lon, explicitLocation, mapStyle, v };
 }
 
-function buildPropUrl({ domain, year, month, day, hour, parameter, crop }) {
-  const def = PARAMETERS[parameter];
-  const cropSuffix = def.needsCrop ? `_${crop || DEFAULT_CROP}` : "";
-  return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${def.prop}${cropSuffix}.webp`;
+function buildPropUrl({ domain, year, month, day, hour }) {
+  return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${PROP}.webp`;
 }
 
-function buildBaseUrl({ domain, mapStyle, parameter, crop }) {
+function buildWindUrl({ domain, year, month, day, hour }) {
+  return `${FOLDER_ROOT}/${domain}/${year}/${month}/${day}/${pad2(hour)}00_${WIND_PROP}_vec.webp`;
+}
+
+function buildBaseUrl({ domain, mapStyle }) {
   const layer = BASE_LAYERS[mapStyle] || BASE_LAYERS.geographic;
-  const cropSuffix = PARAMETERS[parameter].needsCrop ? `_${crop || DEFAULT_CROP}` : "";
-  return `${FOLDER_ROOT}/${domain}/${layer}${cropSuffix}.webp`;
+  return `${FOLDER_ROOT}/${domain}/${layer}.webp`;
 }
 
 // The point that zoom always keeps centred: the spoofed/geolocated position
@@ -408,13 +373,12 @@ const statusEl = document.getElementById("status");
 const coordsEl = document.getElementById("coords");
 const realCoordsEl = document.getElementById("realCoords");
 const plotEl = document.getElementById("plot");
+const windVecEl = document.getElementById("windVec");
 const terrainEl = document.getElementById("terrain");
 const mapContainerEl = document.getElementById("mapContainer");
 const osmMapEl = document.getElementById("osmMap");
 const hourDownBtn = document.getElementById("hourDown");
 const hourUpBtn = document.getElementById("hourUp");
-const parameterSelect = document.getElementById("parameterSelect");
-const locationSelect = document.getElementById("locationSelect");
 const mapStyleSelect = document.getElementById("mapStyleSelect");
 const opacitySlider = document.getElementById("opacitySlider");
 const zoomInZone = document.getElementById("zoomInZone");
@@ -434,9 +398,10 @@ function updateSliderFill() {
 plotEl.style.opacity = opacitySlider.value / 100;
 updateSliderFill();
 
-// Leaflet map + overlay, created lazily the first time OSM mode is used
+// Leaflet map + overlays, created lazily the first time OSM mode is used
 let leafletMap = null;
 let leafletOverlay = null;
+let leafletWindOverlay = null;
 function ensureLeafletMap() {
   if (leafletMap) return;
   leafletMap = L.map(osmMapEl, {
@@ -456,6 +421,7 @@ function ensureLeafletMap() {
   }).addTo(leafletMap);
   const bounds = [[OSM_BOUNDS.south, OSM_BOUNDS.west], [OSM_BOUNDS.north, OSM_BOUNDS.east]];
   leafletOverlay = L.imageOverlay("", bounds, { opacity: opacitySlider.value / 100 }).addTo(leafletMap);
+  leafletWindOverlay = L.imageOverlay("", bounds, { opacity: 1 }).addTo(leafletMap);
   leafletMap.setView(getMapCenter(), 11);
 }
 
@@ -495,6 +461,7 @@ function render() {
   updateCoordsDisplay();
 
   const plotUrl = buildPropUrl(params);
+  const windUrl = buildWindUrl(params);
 
   titleEl.textContent = `${pad2(params.hour)}:00z`;
 
@@ -504,6 +471,7 @@ function render() {
     ensureLeafletMap();
     leafletMap.setView(getMapCenter(), leafletMap.getZoom());
     leafletOverlay.setUrl(plotUrl);
+    leafletWindOverlay.setUrl(windUrl);
     setTimeout(() => leafletMap.invalidateSize(), 0);
   } else {
     osmMapEl.style.display = "none";
@@ -514,24 +482,16 @@ function render() {
     plotEl.onerror = () => {
       titleEl.innerHTML = `<span class="error">No data at this location/date/time:<br>${plotUrl}</span>`;
     };
+    windVecEl.src = windUrl;
     applyZoom();
   }
 
   hourDownBtn.disabled = params.hour <= minHour;
   hourUpBtn.disabled = params.hour >= MAX_SITE_HOUR;
-  parameterSelect.value = params.parameter;
-  locationSelect.style.display = PARAMETERS[params.parameter].needsCrop ? "block" : "none";
-  if (PARAMETERS[params.parameter].needsCrop) {
-    locationSelect.value = params.crop || DEFAULT_CROP;
-  }
   mapStyleSelect.value = params.mapStyle;
-  // Wind mode's crops have no verified OSM bounds
-  mapStyleSelect.querySelector('option[value="osm"]').disabled = PARAMETERS[params.parameter].needsCrop;
 
   // Reflect current state in the URL for shareability
   const q = new URLSearchParams();
-  q.set("param", params.parameter);
-  if (PARAMETERS[params.parameter].needsCrop) q.set("zoom", params.crop || DEFAULT_CROP);
   q.set("style", params.mapStyle);
   q.set("year", params.year);
   q.set("month", params.month);
@@ -557,20 +517,6 @@ hourUpBtn.addEventListener("click", () => {
     params.hour += 1;
     render();
   }
-});
-
-parameterSelect.addEventListener("change", () => {
-  params.parameter = parameterSelect.value;
-  if (PARAMETERS[params.parameter].needsCrop) {
-    if (!params.crop) params.crop = DEFAULT_CROP;
-    if (params.mapStyle === "osm") params.mapStyle = "geographic";
-  }
-  render();
-});
-
-locationSelect.addEventListener("change", () => {
-  params.crop = locationSelect.value;
-  render();
 });
 
 mapStyleSelect.addEventListener("change", () => {
