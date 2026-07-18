@@ -495,6 +495,12 @@ let params = getBaseParams();
 // rebuilds the URL from only the params it knows about and would otherwise
 // silently strip this the moment the page loads.
 const debugMode = new URLSearchParams(window.location.search).get("debug") === "1";
+// ?xv=NN - manual crosshair vertical position as a percent of the screen
+// height (50 = mid-screen). Calibration escape hatch for XCTrack, whose
+// webview lies about its height in ways no automatic fix has survived.
+// The map pans along with it so the cross still marks the spoofed location.
+const xvRaw = parseFloat(new URLSearchParams(window.location.search).get("xv"));
+const xvOverride = Number.isFinite(xvRaw) && xvRaw > 0 && xvRaw < 100 ? xvRaw : null;
 // How far back the ← button is allowed to go: up to 10 hours before now,
 // but never earlier than the site's own earliest published hour.
 const minHour = Math.max(MIN_SITE_HOUR, nowFloorHour() - 10);
@@ -513,6 +519,25 @@ const mapStyleSelect = document.getElementById("mapStyleSelect");
 const opacitySlider = document.getElementById("opacitySlider");
 const zoomInZone = document.getElementById("zoomInZone");
 const zoomOutZone = document.getElementById("zoomOutZone");
+const crosshairEl = document.getElementById("crosshair");
+
+// With ?xv=, pin the crosshair at the requested screen fraction directly
+// (fixed positioning, in vh units so it tracks any viewport size changes).
+if (xvOverride != null) {
+  crosshairEl.style.position = "fixed";
+  crosshairEl.style.top = xvOverride + "vh";
+}
+
+// Converts a percent of 100vh to actual pixels via a probe element, since
+// window.innerHeight is exactly what XCTrack misreports.
+function vhToPx(percent) {
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed;top:0;height:100vh;width:0;visibility:hidden;";
+  document.body.appendChild(probe);
+  const h = probe.getBoundingClientRect().height;
+  probe.remove();
+  return h * percent / 100;
+}
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -553,6 +578,19 @@ function ensureLeafletMap() {
   leafletMap.setView(getMapCenter(), 11);
 }
 
+// Centre the map on the spoofed location, then - if ?xv= is set - pan so
+// that location lands under the crosshair's overridden screen position
+// instead of the (possibly mis-sized) map area's own centre.
+function applyMapView(zoom) {
+  leafletMap.setView(getMapCenter(), zoom == null ? leafletMap.getZoom() : zoom, { animate: false });
+  if (xvOverride != null) {
+    const rect = osmMapEl.getBoundingClientRect();
+    const mapCentreY = rect.top + rect.height / 2;
+    const desiredY = vhToPx(xvOverride);
+    leafletMap.panBy([0, mapCentreY - desiredY], { animate: false });
+  }
+}
+
 // Wind barb markers - live Leaflet markers (not an image), so they stay
 // correctly positioned automatically as the map zooms
 let windBarbMarkers = [];
@@ -588,7 +626,7 @@ function renderWindBarbs() {
 
 function zoomIn() {
   if (params.mapStyle === "osm") {
-    leafletMap.setView(getMapCenter(), leafletMap.getZoom() + 1);
+    applyMapView(leafletMap.getZoom() + 1);
     return;
   }
   if (zoomLevel < MAX_ZOOM) {
@@ -599,7 +637,7 @@ function zoomIn() {
 
 function zoomOut() {
   if (params.mapStyle === "osm") {
-    leafletMap.setView(getMapCenter(), leafletMap.getZoom() - 1);
+    applyMapView(leafletMap.getZoom() - 1);
     return;
   }
   if (zoomLevel > MIN_ZOOM) {
@@ -629,7 +667,7 @@ function render() {
     mapContainerEl.style.display = "none";
     osmMapEl.style.display = "block";
     ensureLeafletMap();
-    leafletMap.setView(getMapCenter(), leafletMap.getZoom());
+    applyMapView(null);
     leafletOverlay.setUrl(plotUrl);
     renderWindBarbs();
     setTimeout(() => leafletMap.invalidateSize(), 0);
@@ -664,6 +702,7 @@ function render() {
   if (params.v) q.set("v", params.v);
   if (debugMode) q.set("debug", "1");
   if (window.__vhOverride) q.set("vh", window.__vhOverride);
+  if (xvOverride != null) q.set("xv", xvOverride);
   history.replaceState(null, "", "?" + q.toString());
 }
 
