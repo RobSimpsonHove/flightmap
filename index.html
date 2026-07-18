@@ -18,7 +18,10 @@
     font-family: system-ui, sans-serif;
     margin: 0;
     padding: 0;
-    height: 100%;
+    height: 100vh;
+    height: 100dvh; /* actual visible height on mobile, ignoring the address
+                       bar's reserved space - fixes the crosshair/bars being
+                       centred against a taller-than-visible layout box */
     overflow: hidden;
   }
 
