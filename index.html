@@ -234,7 +234,7 @@
     color: #999;
     margin-bottom: 0.4rem;
   }
-  #coords, #realCoords {
+  #coords {
     font-size: 0.75rem;
     font-family: monospace;
     color: #ccc;
@@ -308,7 +308,6 @@
 <div id="panel">
   <div class="status" id="status"></div>
   <div id="coords"></div>
-  <div id="realCoords"></div>
 </div>
 
 <select id="mapStyleSelect">
@@ -345,10 +344,6 @@ const OSM_DEFAULT_CENTER = [
   (OSM_BOUNDS.south + OSM_BOUNDS.north) / 2,
   (OSM_BOUNDS.west + OSM_BOUNDS.east) / 2
 ];
-
-// Spoofed location used while testing away from Spain (Sierra de Gredos area,
-// near Piedrahita). Used whenever the URL doesn't override lat/lon itself.
-const SPOOFED_LOCATION = { lat: 40.4978688, lon: -5.230256499999999 };
 
 // Wind barbs: raspuri.mooo.com only has true barbs for its 3 zoomed crops,
 // not the full domain, so instead we fetch raw wind forecasts from Open-Meteo
@@ -460,8 +455,8 @@ function getBaseParams() {
   let lat = q.get("lat") ? parseFloat(q.get("lat")) : null;
   let lon = q.get("lon") ? parseFloat(q.get("lon")) : null;
   // Only true when the URL itself specified lat/lon - lets us avoid ever
-  // writing the default spoofed location back into the URL, where it would
-  // wrongly "stick" and override future changes to SPOOFED_LOCATION.
+  // writing the live geolocated position back into the URL, where it would
+  // wrongly "stick" and override future real-location updates.
   const explicitLocation = lat != null && lon != null;
 
   const mapStyle = ["geographic", "road", "osm"].includes(q.get("style")) ? q.get("style") : "osm";
@@ -508,7 +503,6 @@ const minHour = Math.max(MIN_SITE_HOUR, nowFloorHour() - 10);
 const titleEl = document.getElementById("title");
 const statusEl = document.getElementById("status");
 const coordsEl = document.getElementById("coords");
-const realCoordsEl = document.getElementById("realCoords");
 const plotEl = document.getElementById("plot");
 const terrainEl = document.getElementById("terrain");
 const mapContainerEl = document.getElementById("mapContainer");
@@ -735,30 +729,32 @@ opacitySlider.addEventListener("input", () => {
 zoomInZone.addEventListener("click", zoomIn);
 zoomOutZone.addEventListener("click", zoomOut);
 
-// The map always centres on the spoofed test location (or an explicit
-// ?lat=&lon= override) - it never uses live geolocation for that. We still
-// fetch real geolocation separately, purely to display as text.
+// The map centres on the real device location via live geolocation, or an
+// explicit ?lat=&lon= URL override. While geolocation is pending - or if
+// it's unavailable/denied - getMapCenter() falls back to the domain centre.
 function init() {
-  if (params.lat == null || params.lon == null) {
-    params.lat = SPOOFED_LOCATION.lat;
-    params.lon = SPOOFED_LOCATION.lon;
-  }
-  statusEl.textContent = `Centred on ${params.lat}, ${params.lon} (spoofed)`;
   render();
 
-  if (navigator.geolocation) {
-    realCoordsEl.textContent = "Obtaining real location…";
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        realCoordsEl.textContent =
-          `Real location: ${pos.coords.latitude.toFixed(5)}°, ${pos.coords.longitude.toFixed(5)}°`;
-      },
-      (err) => {
-        realCoordsEl.textContent = `Real location unavailable (${err.message})`;
-      },
-      { timeout: 8000 }
-    );
+  if (params.explicitLocation) return;
+
+  if (!navigator.geolocation) {
+    statusEl.textContent = "Geolocation not supported - showing full domain";
+    return;
   }
+
+  statusEl.textContent = "Obtaining location…";
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      params.lat = pos.coords.latitude;
+      params.lon = pos.coords.longitude;
+      statusEl.textContent = "";
+      render();
+    },
+    (err) => {
+      statusEl.textContent = `Location unavailable (${err.message}) - showing full domain`;
+    },
+    { timeout: 8000 }
+  );
 }
 
 init();
