@@ -188,12 +188,22 @@
   }
 
   /* Full-width bottom bar: opacity slider. Pinned not to the webview's own
-     bottom edge but to the bottom of the *visible* area (100vh minus the
-     measured/overridden height = the clipped/obscured strip, if any). */
+     bottom edge but to the bottom of the *visible* area (100dvh minus the
+     measured/overridden height = the clipped/obscured strip, if any).
+     Deliberately layered: plain vh first (always valid, matches old
+     behaviour), then a dvh version that only takes effect where dvh is
+     actually supported - if not, that whole declaration is invalid and
+     ignored, leaving the vh one in place. This matters because position:fixed
+     always resolves plain "vh" against the browser's LARGE viewport (as if
+     the address bar were hidden) regardless of its current state, while
+     --vh-actual tracks the CURRENT viewport - on browsers where that gap is
+     real (e.g. plain mobile Chrome), the vh-based calc leaves a dead strip
+     of bare page below this bar; dvh matches --vh-actual's basis instead. */
   #bottomBar {
     position: fixed;
     bottom: 0;
     bottom: calc(100vh - var(--vh-actual, 100vh));
+    bottom: calc(100dvh - var(--vh-actual, 100dvh));
     left: 0;
     right: 0;
     height: var(--bottom-bar-height);
@@ -244,6 +254,7 @@
     position: fixed;
     bottom: calc(var(--bottom-bar-height) + 0.5rem);
     bottom: calc(100vh - var(--vh-actual, 100vh) + var(--bottom-bar-height) + 0.5rem);
+    bottom: calc(100dvh - var(--vh-actual, 100dvh) + var(--bottom-bar-height) + 0.5rem);
     left: 0.5rem;
     z-index: 100;
     font-size: 2rem;
@@ -890,16 +901,20 @@ if (debugMode) {
   function updateDebug() {
     const vp = mapViewportOrNull();
     const ch = document.getElementById("crosshair");
+    const bb = document.getElementById("bottomBar");
     const chRect = ch ? ch.getBoundingClientRect() : null;
     const vpRect = vp ? vp.getBoundingClientRect() : null;
+    const bbRect = bb ? bb.getBoundingClientRect() : null;
     box.textContent =
       `innerHeight: ${window.innerHeight}\n` +
+      `measuredDvh(): ${measuredDvh().toFixed(1)}\n` +
       `clientHeight: ${document.documentElement.clientHeight}\n` +
       `screen.height: ${screen.height}\n` +
       `visualViewport.height: ${window.visualViewport ? window.visualViewport.height : "n/a"}\n` +
       `devicePixelRatio: ${window.devicePixelRatio}\n` +
       `--vh-actual: ${getComputedStyle(document.documentElement).getPropertyValue("--vh-actual")}\n` +
       `mapViewport rect: top=${vpRect ? vpRect.top.toFixed(0) : "?"} height=${vpRect ? vpRect.height.toFixed(0) : "?"} bottom=${vpRect ? vpRect.bottom.toFixed(0) : "?"}\n` +
+      `bottomBar rect: top=${bbRect ? bbRect.top.toFixed(0) : "?"} bottom=${bbRect ? bbRect.bottom.toFixed(0) : "?"} computedBottom=${bb ? getComputedStyle(bb).bottom : "?"}\n` +
       `crosshair rect: top=${chRect ? chRect.top.toFixed(0) : "?"} centerY=${chRect ? (chRect.top + chRect.height / 2).toFixed(0) : "?"}\n` +
       `userAgent: ${navigator.userAgent}`;
   }
