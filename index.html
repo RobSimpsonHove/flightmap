@@ -485,6 +485,16 @@ function getMapCenter() {
   return OSM_DEFAULT_CENTER;
 }
 
+// Fractional (0-1) position of a lat/lon within the full d02 domain image,
+// using the same OSM_BOUNDS calibration OSM mode relies on - valid here too
+// since Geographic/Road mode always shows that same uncropped domain image.
+function fracFromLatLon(lat, lon) {
+  return {
+    fx: (lon - OSM_BOUNDS.west) / (OSM_BOUNDS.east - OSM_BOUNDS.west),
+    fy: (OSM_BOUNDS.north - lat) / (OSM_BOUNDS.north - OSM_BOUNDS.south)
+  };
+}
+
 let params = getBaseParams();
 // Captured before render() ever runs, since render()'s history.replaceState
 // rebuilds the URL from only the params it knows about and would otherwise
@@ -506,6 +516,7 @@ const coordsEl = document.getElementById("coords");
 const plotEl = document.getElementById("plot");
 const terrainEl = document.getElementById("terrain");
 const mapContainerEl = document.getElementById("mapContainer");
+const mapViewportEl = document.getElementById("mapViewport");
 const osmMapEl = document.getElementById("osmMap");
 const hourDownBtn = document.getElementById("hourDown");
 const hourUpBtn = document.getElementById("hourUp");
@@ -640,8 +651,25 @@ function zoomOut() {
   }
 }
 
+// Pans the static domain image under the (fixed on-screen) crosshair so it
+// keeps marking the real lat/lon through zoom, the same way applyMapView()
+// re-centers the Leaflet map in OSM mode. translate() operates in literal
+// px/percent of the element's own unscaled box, so this offset composes
+// cleanly with the trailing scale() regardless of zoom level.
 function applyZoom() {
-  mapContainerEl.style.transform = `translate(-50%, -50%) scale(${zoomLevel})`;
+  let dx = 0, dy = 0;
+  if (params.lat != null && params.lon != null && terrainEl.naturalWidth) {
+    const vpRect = mapViewportEl.getBoundingClientRect();
+    const baseWidth = vpRect.width;
+    const baseHeight = baseWidth * terrainEl.naturalHeight / terrainEl.naturalWidth;
+    const { fx, fy } = fracFromLatLon(params.lat, params.lon);
+    const viewportCenterY = vpRect.top + vpRect.height / 2;
+    const crosshairTargetY = xvOverride != null ? vhToPx(xvOverride) : viewportCenterY;
+    dx = zoomLevel * baseWidth * (0.5 - fx);
+    dy = (crosshairTargetY - viewportCenterY) + zoomLevel * baseHeight * (0.5 - fy);
+  }
+  mapContainerEl.style.transform =
+    `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(${zoomLevel})`;
 }
 
 function updateCoordsDisplay() {
@@ -649,6 +677,16 @@ function updateCoordsDisplay() {
     ? `${params.lat.toFixed(5)}°, ${params.lon.toFixed(5)}°`
     : "location unknown";
 }
+
+// applyZoom() needs terrainEl.naturalWidth/Height, which are 0 until the
+// image finishes loading - reapply once they're known, and again on any
+// resize/orientation change since it also depends on the viewport's width.
+terrainEl.addEventListener("load", () => {
+  if (params.mapStyle !== "osm") applyZoom();
+});
+window.addEventListener("resize", () => {
+  if (params.mapStyle !== "osm") applyZoom();
+});
 
 function render() {
   updateCoordsDisplay();
