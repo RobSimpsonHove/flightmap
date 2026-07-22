@@ -45,6 +45,7 @@
 <style>
   html, body {
     --top-bar-height: 6.75rem;
+    --scale-bar-height: 1.5rem;
     --bottom-bar-height: 6rem;
     background: #111;
     color: #eee;
@@ -59,15 +60,15 @@
     overflow: hidden;
   }
 
-  /* Map fills everything below the top bar and above the opacity bar. */
+  /* Map fills everything below the top bar + scale bar and above the opacity bar. */
   .map_viewport {
     position: fixed;
-    top: var(--top-bar-height);
+    top: calc(var(--top-bar-height) + var(--scale-bar-height));
     left: 0;
     right: 0;
-    height: calc(100vh - var(--top-bar-height) - var(--bottom-bar-height));
-    height: calc(100dvh - var(--top-bar-height) - var(--bottom-bar-height));
-    height: calc(var(--vh-actual, 100dvh) - var(--top-bar-height) - var(--bottom-bar-height));
+    height: calc(100vh - var(--top-bar-height) - var(--scale-bar-height) - var(--bottom-bar-height));
+    height: calc(100dvh - var(--top-bar-height) - var(--scale-bar-height) - var(--bottom-bar-height));
+    height: calc(var(--vh-actual, 100dvh) - var(--top-bar-height) - var(--scale-bar-height) - var(--bottom-bar-height));
     overflow: hidden;
   }
   .map_container {
@@ -151,6 +152,23 @@
     cursor: not-allowed;
   }
 
+  /* Full-width scale bar: alternating black/white stripes, each --stripe-width
+     (set by JS from the current zoom/mode) representing 5km on the ground. */
+  #scaleBar {
+    position: fixed;
+    top: var(--top-bar-height);
+    left: 0;
+    right: 0;
+    height: var(--scale-bar-height);
+    z-index: 100;
+    --stripe-width: 0px;
+    background-image: repeating-linear-gradient(
+      to right,
+      #000 0, #000 var(--stripe-width),
+      #fff var(--stripe-width), #fff calc(var(--stripe-width) * 2)
+    );
+  }
+
   /* Full-width bottom bar: opacity slider. Pinned not to the webview's own
      bottom edge but to the bottom of the *visible* area (100vh minus the
      measured/overridden height = the clipped/obscured strip, if any). */
@@ -221,7 +239,7 @@
   /* Floating status/coords panel */
   #panel {
     position: fixed;
-    top: calc(var(--top-bar-height) + 0.5rem);
+    top: calc(var(--top-bar-height) + var(--scale-bar-height) + 0.5rem);
     left: 0.5rem;
     z-index: 100;
     background: rgba(0, 0, 0, 0.6);
@@ -300,6 +318,8 @@
   <h1 id="title">Loading&hellip;</h1>
   <button id="hourUp">&rarr;</button>
 </div>
+
+<div id="scaleBar" title="Each stripe = 5km"></div>
 
 <div id="bottomBar">
   <input type="range" id="opacitySlider" min="0" max="100" value="50">
@@ -525,6 +545,7 @@ const opacitySlider = document.getElementById("opacitySlider");
 const zoomInZone = document.getElementById("zoomInZone");
 const zoomOutZone = document.getElementById("zoomOutZone");
 const crosshairEl = document.getElementById("crosshair");
+const scaleBarEl = document.getElementById("scaleBar");
 
 // With ?xv=, pin the crosshair at the requested screen fraction directly
 // (fixed positioning, in vh units so it tracks any viewport size changes).
@@ -596,6 +617,38 @@ function applyMapView(zoom) {
   }
 }
 
+// Horizontal ground scale in OSM mode, read directly from Leaflet's own
+// projection so it matches whatever's actually on screen at this zoom level.
+function pixelsPerKmOSM() {
+  const size = leafletMap.getSize();
+  if (!size.x) return null;
+  const p1 = leafletMap.containerPointToLatLng([0, size.y / 2]);
+  const p2 = leafletMap.containerPointToLatLng([size.x, size.y / 2]);
+  const widthKm = p1.distanceTo(p2) / 1000;
+  return widthKm > 0 ? size.x / widthKm : null;
+}
+
+// Horizontal ground scale in Geographic/Road mode. There's no live projection
+// here, just the static domain image, so this uses the same OSM_BOUNDS
+// calibration (fit to that same full image) plus a standard equirectangular
+// km-per-degree-longitude approximation - plenty accurate for a scale bar.
+function pixelsPerKmStatic() {
+  const lat = params.lat != null ? params.lat : OSM_DEFAULT_CENTER[0];
+  const vpRect = mapViewportEl.getBoundingClientRect();
+  if (!vpRect.width) return null;
+  const visibleLonSpan = (OSM_BOUNDS.east - OSM_BOUNDS.west) / zoomLevel;
+  const kmPerDegLon = 111.32 * Math.cos(lat * Math.PI / 180);
+  const widthKm = visibleLonSpan * kmPerDegLon;
+  return widthKm > 0 ? vpRect.width / widthKm : null;
+}
+
+function updateScaleBar() {
+  const pxPerKm = params.mapStyle === "osm"
+    ? (leafletMap ? pixelsPerKmOSM() : null)
+    : pixelsPerKmStatic();
+  scaleBarEl.style.setProperty("--stripe-width", pxPerKm ? `${(pxPerKm * 5).toFixed(2)}px` : "0px");
+}
+
 // Wind barb markers - live Leaflet markers (not an image), so they stay
 // correctly positioned automatically as the map zooms
 let windBarbMarkers = [];
@@ -632,22 +685,26 @@ function renderWindBarbs() {
 function zoomIn() {
   if (params.mapStyle === "osm") {
     applyMapView(leafletMap.getZoom() + 1);
+    updateScaleBar();
     return;
   }
   if (zoomLevel < MAX_ZOOM) {
     zoomLevel = Math.min(MAX_ZOOM, zoomLevel + ZOOM_STEP);
     applyZoom();
+    updateScaleBar();
   }
 }
 
 function zoomOut() {
   if (params.mapStyle === "osm") {
     applyMapView(leafletMap.getZoom() - 1);
+    updateScaleBar();
     return;
   }
   if (zoomLevel > MIN_ZOOM) {
     zoomLevel = Math.max(MIN_ZOOM, zoomLevel - ZOOM_STEP);
     applyZoom();
+    updateScaleBar();
   }
 }
 
@@ -686,6 +743,7 @@ terrainEl.addEventListener("load", () => {
 });
 window.addEventListener("resize", () => {
   if (params.mapStyle !== "osm") applyZoom();
+  updateScaleBar();
 });
 
 function render() {
@@ -702,7 +760,8 @@ function render() {
     applyMapView(null);
     leafletOverlay.setUrl(plotUrl);
     renderWindBarbs();
-    setTimeout(() => leafletMap.invalidateSize(), 0);
+    updateScaleBar();
+    setTimeout(() => { leafletMap.invalidateSize(); updateScaleBar(); }, 0);
   } else {
     osmMapEl.style.display = "none";
     mapContainerEl.style.display = "block";
@@ -714,6 +773,7 @@ function render() {
       titleEl.innerHTML = `<span class="error">No data at this location/date/time:<br>${plotUrl}</span>`;
     };
     applyZoom();
+    updateScaleBar();
   }
 
   hourDownBtn.disabled = params.hour <= minHour;
