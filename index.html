@@ -10,18 +10,36 @@
 <script>
   // Some embedded webviews (e.g. XCTrack's built-in browser) don't reliably
   // support dvh or have their own viewport quirks that dvh doesn't fix.
-  // window.innerHeight is far more universally accurate, so we measure it
-  // directly and expose it as a CSS variable, kept in sync on resize.
+  // window.innerHeight was found more reliable there, so it's used as a
+  // fallback source, exposed as a CSS variable kept in sync on resize.
   //
   // Worse still, XCTrack was found to CLIP the bottom of the webview while
   // still reporting the full height to every JS API (innerHeight,
   // visualViewport, screen.height all agreed on 720 while the bottom bar was
   // visibly cut off) - undetectable from inside, so ?vh=NNN lets the user
   // declare the truly visible height manually and calibrate by eye.
+  //
+  // The opposite mismatch shows up in plain mobile Chrome: innerHeight
+  // tracks the CURRENT (small) viewport as the address bar shows/hides, but
+  // position:fixed elements - everything in this app's layout - always
+  // anchor to the LARGE viewport regardless. Measured on-device: innerHeight
+  // reported 592 while the fixed bars/crosshair were actually laid out
+  // against a ~690px viewport, leaving a ~100px dead strip of bare page
+  // background above the real bottom edge. dvh is built to track exactly
+  // what position:fixed anchors to, so rather than trust one source, take
+  // whichever of dvh/innerHeight is larger - correct in both directions.
   const vhParam = parseInt(new URLSearchParams(window.location.search).get("vh"), 10);
   window.__vhOverride = Number.isFinite(vhParam) && vhParam > 100 ? vhParam : null;
+  function measuredDvh() {
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;top:0;height:100dvh;width:0;visibility:hidden;";
+    document.documentElement.appendChild(probe);
+    const h = probe.getBoundingClientRect().height;
+    probe.remove();
+    return h;
+  }
   function setActualViewportHeight() {
-    const h = window.__vhOverride || window.innerHeight;
+    const h = window.__vhOverride || Math.max(measuredDvh(), window.innerHeight);
     document.documentElement.style.setProperty("--vh-actual", h + "px");
   }
   setActualViewportHeight();
